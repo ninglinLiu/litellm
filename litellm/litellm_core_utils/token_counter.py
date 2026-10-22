@@ -1010,13 +1010,33 @@ def _count_content_list(
                 tool_name = str(c.get("tool_name") or "")
                 if tool_name:
                     num_tokens += count_function(tool_name)
+            elif c["type"] == "search_result":
+                # Anthropic Messages search_result block. Count title, source, and
+                # nested content so /v1/messages/count_tokens accepts conversations
+                # that /v1/messages already accepts.
+                title = str(c.get("title") or "")
+                source = str(c.get("source") or "")
+                if title:
+                    num_tokens += count_function(title)
+                if source:
+                    num_tokens += count_function(source)
+                nested = c.get("content")
+                if isinstance(nested, str):
+                    num_tokens += count_function(nested)
+                elif isinstance(nested, list):
+                    num_tokens += _count_content_list(
+                        count_function,
+                        nested,
+                        use_default_image_token_count,
+                        default_token_count,
+                    )
             else:
                 content_type = c.get("type", type(c).__name__) if isinstance(c, dict) else type(c).__name__
                 raise ValueError(
                     f"Invalid content item type: {content_type}. "
                     f"Expected str or dict with 'type' field "
                     f"(text, image_url, image, document, file, tool_use, tool_result, thinking, redacted_thinking, "
-                    f"tool_reference)."
+                    f"tool_reference, search_result)."
                 )
         return num_tokens
     except Exception as e:

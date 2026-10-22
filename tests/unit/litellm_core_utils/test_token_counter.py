@@ -1265,6 +1265,29 @@ def test_count_content_list_rejects_unknown_type():
     message = str(exc_info.value)
     assert "Invalid content item type: totally_unknown_block" in message
     assert "tool_reference" in message
+    assert "search_result" in message
+
+
+def test_token_counter_with_search_result_block():
+    """Anthropic `search_result` content blocks must count title/source/content, not raise."""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "search_result",
+                    "source": "https://docs.example.invalid/notes",
+                    "title": "Project notes",
+                    "content": [{"type": "text", "text": "The code word is 7f3a."}],
+                },
+                {"type": "text", "text": "Reply with only the code word you were given, or NONE."},
+            ],
+        }
+    ]
+    tokens = token_counter_new(
+        model="anthropic/claude-sonnet-4-5-20250929", messages=messages
+    )
+    assert tokens > 0, f"Expected positive token count, got {tokens}"
 
 
 @pytest.mark.parametrize(
