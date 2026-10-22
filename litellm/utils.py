@@ -9057,6 +9057,11 @@ class ProviderConfigManager:
         return None
 
     @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_vertex_ai_rerank_config() -> "BaseRerankConfig":
+        return litellm.VertexAIRerankConfig()
+
+    @staticmethod
     def get_provider_rerank_config(
         model: str,
         provider: LlmProviders,
@@ -9091,7 +9096,9 @@ class ProviderConfigManager:
 
             return get_nvidia_nim_rerank_config(model)
         elif litellm.LlmProviders.VERTEX_AI == provider:
-            return litellm.VertexAIRerankConfig()
+            # Reuse one config instance so VertexBase._credentials_project_mapping
+            # survives across rerank requests (same class of bug as #26065 / #26099).
+            return ProviderConfigManager._get_vertex_ai_rerank_config()
         elif litellm.LlmProviders.FIREWORKS_AI == provider:
             return litellm.FireworksAIRerankConfig()
         elif litellm.LlmProviders.VOYAGE == provider:
