@@ -22,6 +22,7 @@ from litellm.secret_managers.get_azure_ad_token_provider import (
 )
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.router import GenericLiteLLMParams
+from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.utils import add_path_to_api_base
 
 azure_ad_cache: Final = DualCache()
@@ -833,17 +834,24 @@ class BaseAzureLLM(BaseOpenAILLM):
         if "api-version" not in query_params and api_version:
             query_params["api-version"] = api_version
 
-        # Add the path to the base URL
-        if route not in api_base:
-            new_url = add_path_to_api_base(api_base=api_base, ending_path=route)
-        else:
-            new_url = api_base
-
         if BaseAzureLLM._is_azure_v1_api_version(api_version):
-            # ensure the request go to /openai/v1 and not just /openai
-            if "/openai/v1" not in new_url:
-                parsed_url: Final = httpx.URL(new_url)
-                new_url = str(parsed_url.copy_with(path=parsed_url.path.replace("/openai", "/openai/v1")))
+            # Match chat client's base_url construction: ensure .../openai/v1 once, then
+            # append the leaf (responses, vector_stores, ...). Replacing every /openai with
+            # /openai/v1 (or only the last one) breaks gateway prefixes like
+            # .../foundry/openai when the same api_base must serve both chat and responses.
+            leaf = route.rstrip("/").split("/")[-1]
+            if route.endswith(f"/openai/v1/{leaf}") or route.endswith(f"/openai/{leaf}"):
+                new_url = f"{ensure_api_route(api_base, 'openai/v1')}/{leaf}"
+            elif route not in api_base:
+                new_url = add_path_to_api_base(api_base=api_base, ending_path=route)
+            else:
+                new_url = api_base
+        else:
+            # Add the path to the base URL
+            if route not in api_base:
+                new_url = add_path_to_api_base(api_base=api_base, ending_path=route)
+            else:
+                new_url = api_base
 
         # Use the new query_params dictionary
         final_url: Final = httpx.URL(new_url).copy_with(params=query_params)
