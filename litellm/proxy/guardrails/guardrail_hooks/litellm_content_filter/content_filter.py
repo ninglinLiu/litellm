@@ -2030,6 +2030,59 @@ class ContentFilterGuardrail(CustomGuardrail):
         )
         return any(word in cut_sentence for word in plan.conditional_words)
 
+    # Probes that complete common prebuilt patterns whose middle can be unbounded
+    # whitespace (generic_api_key, street_address). Used only to detect an open
+    # prefix that a buffer trim would otherwise drop (see #48007).
+    _OPEN_PATTERN_COMPLETION_PROBES: Final[tuple[str, ...]] = (
+        "X" * 32,
+        " Street",
+        " Avenue",
+        " Road",
+    )
+
+    def _cut_drops_open_pattern_prefix(self, head: str) -> bool:
+        """
+        True when ``head`` alone does not match any configured pattern, but appending
+        a short completion probe would. Trimming away that head would drop the label
+        (e.g. ``api_key:``) before the secret arrives in a later chunk.
+        """
+        if not head or not self.compiled_patterns:
+            return False
+        for pattern_entry in self.compiled_patterns:
+            regex = pattern_entry["regex"]
+            if regex.search(head):
+                continue
+            for probe in self._OPEN_PATTERN_COMPLETION_PROBES:
+                if regex.search(head + probe):
+                    return True
+        return False
+
+    def _earliest_open_pattern_prefix_start(self, text: str) -> int:
+        """
+        Index where the earliest open pattern prefix suffix of ``text`` begins.
+
+        Open-prefix-ness is not monotonic in the start index (``api_key:…`` is open
+        while ``pi_key:…`` is not), so we scan token starts rather than binary-search.
+        Returns ``len(text)`` when no open prefix is present, so callers can ``min``
+        it into the stream yield limit without a separate branch.
+        """
+        if not self._cut_drops_open_pattern_prefix(text):
+            return len(text)
+
+        def _is_token_start(index: int) -> bool:
+            if index == 0:
+                return True
+            prev = text[index - 1]
+            cur = text[index]
+            if cur.isspace():
+                return False
+            return prev.isspace() or not (prev.isalnum() or prev in "_-")
+
+        for index in range(len(text)):
+            if _is_token_start(index) and self._cut_drops_open_pattern_prefix(text[index:]):
+                return index
+        return len(text)
+
     def _trim_streamed_choice_buffer(
         self, state: _StreamedChoiceState, masked_text: str, plan: _StreamedScanPlan
     ) -> _StreamedChoiceState:
@@ -2037,10 +2090,11 @@ class ContentFilterGuardrail(CustomGuardrail):
         Bound the per-choice buffer rescanned on every streamed chunk.
 
         Once the buffer exceeds twice the scan context, drop everything but the last
-        context-sized tail, provided no exception phrase or unfinished conditional sentence
-        would leave the buffer, the two halves mask to the same output as the whole (so no
-        match or phrase straddles the cut), and the dropped prefix has already been yielded.
-        Otherwise keep the buffer and retry once it has grown by another context length.
+        context-sized tail, provided no exception phrase, unfinished conditional sentence,
+        or open pattern prefix (e.g. ``api_key:`` waiting for the key) would leave the
+        buffer, the two halves mask to the same output as the whole (so no match or phrase
+        straddles the cut), and the dropped prefix has already been yielded. Otherwise keep
+        the buffer and retry once it has grown by another context length.
 
         Detections found in the dropped prefix move to the state's committed detections.
         """
@@ -2050,6 +2104,8 @@ class ContentFilterGuardrail(CustomGuardrail):
         head: Final = state.buffered_text[: -plan.context_chars]
         tail: Final = state.buffered_text[-plan.context_chars :]
         if self._cut_breaks_wider_context(state.buffered_text, head, tail, plan):
+            return deferred
+        if self._cut_drops_open_pattern_prefix(head):
             return deferred
         head_detections: Final[list[ContentFilterDetection]] = []  # mutable-ok: filled by _filter_single_text
         try:
@@ -2151,6 +2207,17 @@ class ContentFilterGuardrail(CustomGuardrail):
                             previous_state.yielded_masked_text_len,
                             len(masked_text) - (0 if is_final else CONTENT_FILTER_STREAMING_HOLDBACK_CHARS),
                         )
+                        if not is_final:
+                            # Hold an incomplete pattern label (api_key: + whitespace, etc.)
+                            # until it completes or the stream ends, so MASK can still redact
+                            # a secret that arrives in a later chunk (#48007).
+                            safe_to_yield_len = min(
+                                safe_to_yield_len,
+                                max(
+                                    previous_state.yielded_masked_text_len,
+                                    self._earliest_open_pattern_prefix_start(masked_text),
+                                ),
+                            )
                         choice.delta.content = masked_text[previous_state.yielded_masked_text_len : safe_to_yield_len]
                         next_state = replace(
                             previous_state,

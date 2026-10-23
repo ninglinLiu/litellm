@@ -1243,6 +1243,51 @@ class TestContentFilterGuardrail:
         assert [d["pattern_name"] for d in entry["guardrail_response"]] == ["email"]
         assert entry["masked_entity_count"] == {"email": 1}
 
+    @pytest.mark.asyncio
+    async def test_streaming_hook_blocks_api_key_split_by_long_whitespace(self):
+        """
+        generic_api_key can have unbounded whitespace between the label and the key.
+        A long whitespace run used to let the stream trim drop ``api_key:`` before the
+        key arrived, so BLOCK/MASK never fired (BerriAI/litellm#48007).
+        """
+        key: Final = "7391826405518273640192837465"
+        guardrail: Final = ContentFilterGuardrail(
+            guardrail_name="test-streaming-api-key-long-ws",
+            patterns=[
+                ContentFilterPattern(
+                    pattern_type="prebuilt",
+                    pattern_name="generic_api_key",
+                    action=ContentFilterAction.BLOCK,
+                )
+            ],
+            event_hook=GuardrailEventHooks.post_call,
+        )
+        chunks: Final = [
+            "api_key:" + (" " * (4 * CONTENT_FILTER_STREAMING_SCAN_CONTEXT_CHARS)),
+            key,
+        ]
+        metadata: Final[dict[str, list[StandardLoggingGuardrailInformation]]] = {}
+
+        with pytest.raises(HTTPException) as exc_info:
+            await self._collect_streamed_text(guardrail, chunks, metadata)
+        assert exc_info.value.status_code == 400
+
+        mask_guardrail: Final = ContentFilterGuardrail(
+            guardrail_name="test-streaming-api-key-long-ws-mask",
+            patterns=[
+                ContentFilterPattern(
+                    pattern_type="prebuilt",
+                    pattern_name="generic_api_key",
+                    action=ContentFilterAction.MASK,
+                )
+            ],
+            event_hook=GuardrailEventHooks.post_call,
+        )
+        mask_metadata: Final[dict[str, list[StandardLoggingGuardrailInformation]]] = {}
+        streamed: Final = await self._collect_streamed_text(mask_guardrail, chunks, mask_metadata)
+        assert key not in streamed
+        assert "[GENERIC_API_KEY_REDACTED]" in streamed
+
     def test_init_with_plain_dicts(self):
         """
         Test initialization with plain dicts (DB format).
