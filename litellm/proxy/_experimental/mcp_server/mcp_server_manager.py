@@ -4436,14 +4436,15 @@ class MCPServerManager:
             # carries no extra_headers bag, which the signer treats as not its call).
             # Skip entirely when the signer is not configured (avoid an unnecessary
             # dict copy on every list call), when the server has its own static
-            # Authorization header, when a per-user mcp_auth_header has already
-            # been resolved, or when the caller already supplied an Authorization
-            # entry in extra_headers (e.g. a per-user OAuth token resolved
-            # upstream) — admin-configured static auth and per-user OAuth must
-            # take precedence so the signer doesn't silently overwrite e.g. an
-            # upstream API key or a user's OAuth token (MCPClient._get_auth_headers
-            # applies extra_headers after writing Authorization from auth_value, so
-            # an injected JWT would otherwise clobber the per-user token).
+            # Authorization header or configured authentication_token/auth_value,
+            # when a per-user mcp_auth_header has already been resolved, or when
+            # the caller already supplied an Authorization entry in extra_headers
+            # (e.g. a per-user OAuth token resolved upstream) — admin-configured
+            # static auth, server auth_value, and per-user OAuth must take
+            # precedence so the signer doesn't silently overwrite e.g. an upstream
+            # API key or a user's OAuth token (MCPClient._get_auth_headers applies
+            # extra_headers after writing Authorization from auth_value, so an
+            # injected JWT would otherwise clobber that credential).
             if user_api_key_auth is not None and not server.spec_path:
                 from litellm.proxy.guardrails.guardrail_hooks.mcp_jwt_signer.mcp_jwt_signer import (
                     get_mcp_jwt_signer,
@@ -4457,10 +4458,15 @@ class MCPServerManager:
                 has_extra_authorization: Final = bool(extra_headers) and any(
                     isinstance(k, str) and k.lower() == "authorization" for k in (extra_headers or {})
                 )
+                # Server-configured bearer/token/basic auth_value lives on
+                # authentication_token, not static_headers. Skip signing when it
+                # is set so the JWT does not clobber the upstream API key (#47988).
+                has_server_auth_value: Final = bool(server.authentication_token)
 
                 if (
                     get_mcp_jwt_signer() is not None
                     and not has_static_authorization
+                    and not has_server_auth_value
                     and not mcp_auth_header
                     and not has_extra_authorization
                 ):
