@@ -822,7 +822,17 @@ def bedrock_capability_model(model: str, base_model: object) -> str:
 
 def strip_bedrock_routing_prefix(model: str) -> str:
     """Strip LiteLLM routing prefixes from model name."""
-    for prefix in ["bedrock/", "chat_completions/", "converse/", "invoke/", "openai/", "mantle/", "nova-2/", "nova/"]:
+    for prefix in [
+        "bedrock/",
+        "chat_completions/",
+        "converse/",
+        "invoke/",
+        "openai/",
+        "mantle/",
+        "nova-2/",
+        "nova/",
+        "claude_platform/",
+    ]:
         if model.startswith(prefix):
             model = model.split("/", 1)[1]
     return model
@@ -1466,6 +1476,20 @@ class BedrockModelInfo(BaseLLMModelInfo):
 
         client: Final = self._client if self._client is not None else litellm.module_level_client
         return sorted(BedrockModelLister(deployment=litellm_params or {}, client=client).invocable_model_ids())
+
+    def get_model_cost_key(self, model: str) -> str | None:
+        """Map Claude Platform API model IDs to Bedrock cost-map keys.
+
+        Claude Platform on AWS takes Claude API IDs (``claude-opus-5-5``). The cost map
+        stores Bedrock pricing under ``anthropic.claude-opus-5-5``. Without this mapping,
+        ``bedrock/claude_platform/...`` requests log ``spend=0``.
+        """
+        stripped = strip_bedrock_routing_prefix(model)
+        if stripped.startswith("claude-"):
+            bedrock_id = f"anthropic.{stripped}"
+            if bedrock_id in litellm.model_cost:
+                return bedrock_id
+        return None
 
     # def get_provider_info(self, model: str) -> Optional[ProviderSpecificModelInfo]:
     #     """
