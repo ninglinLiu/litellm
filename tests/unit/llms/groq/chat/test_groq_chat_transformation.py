@@ -523,3 +523,29 @@ def test_tool_search_reply_sent_to_groq_drops_litellm_response_fields():
             }
         ],
     }
+
+
+def test_streamed_reasoning_reply_sent_to_groq_drops_reasoning_content():
+    """Streamed Groq reasoning is mapped to reasoning_content (#47931); Groq rejects it on the next turn."""
+    streamed_reasoning_reply = {
+        "role": "assistant",
+        "content": "Paris is sunny.",
+        "reasoning_content": "The user asked about weather; answer briefly.",
+    }
+    request = GroqChatConfig().transform_request(
+        model="openai/gpt-oss-20b",
+        messages=[
+            {"role": "user", "content": "Weather in Paris?"},
+            streamed_reasoning_reply,
+            {"role": "user", "content": "Thanks — and tomorrow?"},
+        ],
+        optional_params={},
+        litellm_params={},
+        headers={},
+    )
+
+    assert request["messages"][1] == {
+        "role": "assistant",
+        "content": "Paris is sunny.",
+    }
+    assert "reasoning_content" not in request["messages"][1]
