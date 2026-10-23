@@ -22,10 +22,23 @@ from litellm.secret_managers.get_azure_ad_token_provider import (
 )
 from litellm.secret_managers.main import get_secret_str
 from litellm.types.router import GenericLiteLLMParams
-from litellm.litellm_core_utils.url_utils import ensure_api_route
 from litellm.utils import add_path_to_api_base
 
 azure_ad_cache: Final = DualCache()
+
+
+def _ensure_openai_v1_route(api_base: str) -> str:
+    """Append openai/v1 once, matching chat client base_url construction."""
+    base = api_base.rstrip("/")
+    # Keep scheme slashes: only strip path trailing slash
+    if "://" in base:
+        scheme, rest = base.split("://", 1)
+        base = f"{scheme}://{rest.rstrip('/')}"
+    path = httpx.URL(base).path
+    if path.endswith("/openai/v1"):
+        return base
+    return f"{base}/openai/v1"
+
 
 
 class _AzureAdTokenJson(TypedDict, total=False):
@@ -841,7 +854,7 @@ class BaseAzureLLM(BaseOpenAILLM):
             # .../foundry/openai when the same api_base must serve both chat and responses.
             leaf = route.rstrip("/").split("/")[-1]
             if route.endswith(f"/openai/v1/{leaf}") or route.endswith(f"/openai/{leaf}"):
-                new_url = f"{ensure_api_route(api_base, 'openai/v1')}/{leaf}"
+                new_url = f"{_ensure_openai_v1_route(api_base)}/{leaf}"
             elif route not in api_base:
                 new_url = add_path_to_api_base(api_base=api_base, ending_path=route)
             else:
