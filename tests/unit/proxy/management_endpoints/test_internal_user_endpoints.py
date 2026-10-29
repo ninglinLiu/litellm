@@ -2223,6 +2223,17 @@ def test_update_internal_user_params_reset_max_budget_with_none():
     assert non_default_values["user_id"] == "test_user"
 
 
+def test_update_internal_user_params_clears_max_parallel_requests_with_none():
+    """Explicit null must clear max_parallel_requests the same way it clears
+    rpm_limit and tpm_limit (#49040)."""
+    data = UpdateUserRequest(user_id="u-parallel", max_parallel_requests=None)
+    data_json = data.model_dump(exclude_unset=True)
+    non_default_values = _update_internal_user_params(data_json=data_json, data=data)
+    assert "max_parallel_requests" in non_default_values
+    assert non_default_values["max_parallel_requests"] is None
+
+
+
 def test_update_internal_user_params_explicit_duration_clear_overrides_role_default(monkeypatch):
     import litellm
 

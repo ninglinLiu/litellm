@@ -434,7 +434,11 @@ class _PROXY_MaxParallelRequestsHandler(CustomLogger):
                 cache=cache,
                 data=data,
                 call_type=call_type,
-                max_parallel_requests=sys.maxsize,  # TODO: Support max parallel requests for a user
+                max_parallel_requests=(
+                    user_api_key_dict.user_max_parallel_requests
+                    if user_api_key_dict.user_max_parallel_requests is not None
+                    else sys.maxsize
+                ),
                 current=cache_objects["request_count_user_id"],
                 request_count_api_key=request_count_api_key,
                 tpm_limit=user_tpm_limit,

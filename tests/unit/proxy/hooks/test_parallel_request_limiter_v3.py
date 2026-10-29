@@ -122,6 +122,32 @@ def test_api_key_descriptor_applies_budget_throttle(
     assert api_key_descriptor["rate_limit"]["tokens_per_unit"] == expected_tpm
 
 
+def test_user_descriptor_includes_max_parallel_requests():
+    """A user-level max_parallel_requests must appear on the user descriptor so
+    the v3 limiter can enforce it across every key that user holds (#49040)."""
+    handler = _PROXY_MaxParallelRequestsHandler(
+        internal_usage_cache=InternalUsageCache(DualCache())
+    )
+    user_api_key_dict = UserAPIKeyAuth(
+        api_key=hash_token("sk-user-parallel"),
+        user_id="user-parallel",
+        user_max_parallel_requests=1,
+    )
+
+    descriptors = handler.create_rate_limit_descriptors(
+        user_api_key_dict=user_api_key_dict,
+        data={},
+        rpm_limit_type=None,
+        tpm_limit_type=None,
+        model_has_failures=False,
+    )
+
+    user_descriptor = next(d for d in descriptors if d["key"] == "user")
+    assert user_descriptor["value"] == "user-parallel"
+    assert user_descriptor["rate_limit"]["max_parallel_requests"] == 1
+
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "description", [None, "Gateway metadata, not caller input. " * 100], ids=["unlisted", "listed"]
