@@ -151,7 +151,7 @@ class _OPTIONAL_PromptInjectionDetection(CustomLogger):
         user_api_key_dict: UserAPIKeyAuth,
         cache: DualCache,
         data: dict[str, object],
-        call_type: str,  # "completion", "embeddings", "image_generation", "moderation"
+        call_type: str,  # CallTypesLiteral values, e.g. completion / embedding / transcription
     ) -> dict[str, object] | str | None:
         try:
             """
@@ -164,14 +164,20 @@ class _OPTIONAL_PromptInjectionDetection(CustomLogger):
                     "acompletion",
                     "completion",
                     "text_completion",
-                    "embeddings",
+                    "atext_completion",
+                    "embedding",
+                    "aembedding",
                     "image_generation",
+                    "aimage_generation",
                     "moderation",
-                    "audio_transcription",
+                    "amoderation",
+                    "transcription",
+                    "atranscription",
+                    "audio_transcription",  # legacy alias
                 ]
             except Exception:
                 self.print_verbose(
-                    f"Call Type - {call_type}, not in accepted list - ['completion','embeddings','image_generation','moderation','audio_transcription']"
+                    f"Call Type - {call_type}, not in accepted list of prompt-injection call types"
                 )
                 return data
             formatted_prompt: Final = get_formatted_prompt(data=data, call_type=call_type)
@@ -223,9 +229,12 @@ class _OPTIONAL_PromptInjectionDetection(CustomLogger):
         call_type: Literal[
             "acompletion",
             "completion",
-            "embeddings",
+            "embedding",
+            "aembedding",
             "image_generation",
             "moderation",
+            "transcription",
+            "atranscription",
             "audio_transcription",
         ],
     ) -> bool | None:

@@ -222,7 +222,8 @@ class MlflowLogger(CustomLogger):
 
         if call_type in ["completion", "acompletion"]:
             return SpanType.LLM
-        elif call_type == "embeddings":
+        elif call_type in ["embedding", "aembedding", "embeddings"]:
+            # "embeddings" kept as a legacy alias; runtime uses embedding/aembedding
             return SpanType.EMBEDDING
         else:
             return SpanType.LLM
