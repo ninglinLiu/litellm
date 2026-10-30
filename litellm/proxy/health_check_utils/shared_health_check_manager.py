@@ -196,6 +196,7 @@ class SharedHealthCheckManager:
         details: bool = True,
         max_concurrency: int | None = None,
         health_check_skip_disabled_background_models: bool = False,
+        health_check_paid_media: bool = False,
         router: "Router | None" = None,
     ) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]], dict[str, object]]:
         """
@@ -213,6 +214,7 @@ class SharedHealthCheckManager:
             details: Whether to include detailed information
             max_concurrency: Optional limit on concurrent health check requests
             health_check_skip_disabled_background_models: Remove models with disable_background_health_check: true
+            health_check_paid_media: When true, allow live probes of paid media modes
 
         Returns:
             Tuple of (healthy_endpoints, unhealthy_endpoints)
@@ -247,6 +249,7 @@ class SharedHealthCheckManager:
                     details=details,
                     max_concurrency=max_concurrency,
                     health_check_skip_disabled_background_models=health_check_skip_disabled_background_models,
+                    health_check_paid_media=health_check_paid_media,
                     router=router,
                 )
 
@@ -267,6 +270,7 @@ class SharedHealthCheckManager:
                     details=details,
                     max_concurrency=max_concurrency,
                     health_check_skip_disabled_background_models=health_check_skip_disabled_background_models,
+                    health_check_paid_media=health_check_paid_media,
                     router=router,
                 )
 
@@ -323,6 +327,7 @@ class SharedHealthCheckManager:
                 details=details,
                 max_concurrency=max_concurrency,
                 health_check_skip_disabled_background_models=health_check_skip_disabled_background_models,
+                health_check_paid_media=health_check_paid_media,
                 router=router,
             )
 

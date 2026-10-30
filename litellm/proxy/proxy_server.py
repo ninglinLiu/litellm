@@ -597,6 +597,7 @@ from litellm.proxy.health_check import (
     health_check_filter_kwargs_from_general_settings,
     parse_background_health_check_model_groups,
     perform_health_check,
+    _skips_paid_media_health_checks,
 )
 from litellm.proxy.health_endpoints._health_endpoints import router as health_router
 from litellm.proxy.health_endpoints.deployment_warning_endpoints import router as deployment_warning_router
@@ -4837,9 +4838,14 @@ async def _run_background_health_check():
         _llm_model_list = copy.deepcopy(llm_model_list) or []
         model_count_total = len(_llm_model_list)
 
-        # filter out models that have disabled background health checks
+        # filter out models that have disabled background health checks, and
+        # skip paid-media modes unless the operator opted in (see #49089)
+        _allow_paid_media = bool((general_settings or {}).get("health_check_paid_media", False))
         _llm_model_list = [
-            m for m in _llm_model_list if not m.get("model_info", {}).get("disable_background_health_check", False)
+            m
+            for m in _llm_model_list
+            if not m.get("model_info", {}).get("disable_background_health_check", False)
+            and not _skips_paid_media_health_checks(m, allow_paid_media=_allow_paid_media)
         ]
         scoped_model_groups = llm_router.background_health_check_model_groups if llm_router is not None else None
         _llm_model_list = list(filter_deployments_to_model_groups(_llm_model_list, scoped_model_groups))

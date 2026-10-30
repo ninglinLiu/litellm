@@ -2673,6 +2673,16 @@ class ConfigGeneralSettings(LiteLLMPydanticObjectBase):
             "are skipped for on-demand GET /health as well as the background health loop."
         ),
     )
+    health_check_paid_media: bool = Field(
+        False,
+        description=(
+            "When true, background and on-demand health checks may live-probe "
+            "image_generation, image_edit, video_generation, and audio_speech "
+            "deployments. Default false — those modes synthesize paid media and "
+            "burn provider spend when probed every health interval (see #49089). "
+            "Per-deployment override: model_info.health_check_paid_media: true."
+        ),
+    )
     background_health_check_model_groups: tuple[str, ...] | None = Field(
         None,
         description=(

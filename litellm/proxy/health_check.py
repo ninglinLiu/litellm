@@ -80,6 +80,20 @@ HEALTH_DISPLAY_PARAMS: Final = (
 _MAX_TOKEN_SUPPORT_MODES: Final[frozenset[str]] = frozenset({"chat", "completion", "responses", "anthropic_messages"})
 
 
+# Modes whose default health-check probe synthesizes paid media (image/video/audio).
+# Background health checks skip these unless the operator opts in via
+# general_settings.health_check_paid_media or model_info.health_check_paid_media.
+# Fixes BerriAI/litellm#49089 — live image probes burned thousands of dollars.
+PAID_MEDIA_HEALTH_CHECK_MODES: Final[frozenset[str]] = frozenset(
+    {
+        "image_generation",
+        "image_edit",
+        "video_generation",
+        "audio_speech",
+    }
+)
+
+
 def _native_health_check_mode(model: str, provider_param: object) -> str | None:
     try:
         resolved_model, custom_llm_provider, _, _ = litellm.get_llm_provider(
@@ -193,6 +207,7 @@ def health_check_filter_kwargs_from_general_settings(
         "health_check_skip_disabled_background_models": bool(
             g.get("health_check_skip_disabled_background_models", False)
         ),
+        "health_check_paid_media": bool(g.get("health_check_paid_media", False)),
     }
 
 
@@ -266,16 +281,54 @@ def _skips_health_checks(deployment: Mapping[str, object]) -> bool:
     return bool(info.get("disable_background_health_check", False)) if isinstance(info, Mapping) else False
 
 
+def _deployment_opts_into_paid_media_health(deployment: Mapping[str, object]) -> bool:
+    info: Final = deployment.get("model_info")
+    return bool(info.get("health_check_paid_media", False)) if isinstance(info, Mapping) else False
+
+
+def _deployment_health_check_mode(deployment: Mapping[str, object]) -> str | None:
+    info: Final = deployment.get("model_info")
+    params: Final = deployment.get("litellm_params")
+    return resolve_health_check_mode(
+        info if isinstance(info, Mapping) else {},
+        params if isinstance(params, Mapping) else {},
+    )
+
+
+def is_paid_media_health_check_mode(mode: str | None) -> bool:
+    return mode in PAID_MEDIA_HEALTH_CHECK_MODES
+
+
+def _skips_paid_media_health_checks(
+    deployment: Mapping[str, object], *, allow_paid_media: bool
+) -> bool:
+    """Skip costly image/video/audio probes unless the operator opted in."""
+    if allow_paid_media or _deployment_opts_into_paid_media_health(deployment):
+        return False
+    return is_paid_media_health_check_mode(_deployment_health_check_mode(deployment))
+
+
 def _health_check_eligible(
-    model_list: Sequence[Mapping[str, object]], skip_disabled: bool
+    model_list: Sequence[Mapping[str, object]],
+    skip_disabled: bool,
+    *,
+    allow_paid_media: bool = False,
 ) -> tuple[Mapping[str, object], ...]:
     """Deployments this run is allowed to contact.
 
     The one eligibility gate, applied to the requested set and to the pool a router's
     dependencies are drawn from alike, so an opted-out deployment cannot re-enter through a
     router that depends on it.
+
+    Paid-media modes (image/video/audio synthesis) are skipped unless ``allow_paid_media``
+    is true or the deployment sets ``model_info.health_check_paid_media: true``.
     """
-    return tuple(x for x in model_list if not (skip_disabled and _skips_health_checks(x)))
+    return tuple(
+        x
+        for x in model_list
+        if not (skip_disabled and _skips_health_checks(x))
+        and not _skips_paid_media_health_checks(x, allow_paid_media=allow_paid_media)
+    )
 
 
 def _deployment_model(deployment: Mapping[str, object]) -> str | None:
@@ -887,6 +940,7 @@ async def perform_health_check(
     max_concurrency: int | None = None,
     instrumentation_context: dict | None = None,
     health_check_skip_disabled_background_models: bool = False,
+    health_check_paid_media: bool = False,
     router: "Router | None" = None,
     team_id: str | None = None,
 ):
@@ -906,6 +960,10 @@ async def perform_health_check(
     with ``model_info.disable_background_health_check: true`` are omitted from
     this run (including targeted ``/health`` queries), consistent with the
     background health loop.
+
+    Paid-media modes (``image_generation``, ``image_edit``, ``video_generation``,
+    ``audio_speech``) are omitted unless ``health_check_paid_media`` is True or the
+    deployment sets ``model_info.health_check_paid_media: true`` (see #49089).
 
     Returns:
         (bool): True if the health check passes, False otherwise.
@@ -930,7 +988,11 @@ async def perform_health_check(
     cycle_start_time: Final = time.monotonic()
     requested_model_count: Final = len(model_list)
     skip_disabled: Final = health_check_skip_disabled_background_models
-    narrowed: Final = _health_check_eligible(_narrow_to_target(model_list, model, model_id, team_id), skip_disabled)
+    narrowed: Final = _health_check_eligible(
+        _narrow_to_target(model_list, model, model_id, team_id),
+        skip_disabled,
+        allow_paid_media=health_check_paid_media,
+    )
     if not narrowed:
         if instrumentation_enabled:
             logger.debug(
@@ -945,7 +1007,11 @@ async def perform_health_check(
     deduped_model_count: Final = len(requested)
 
     dependency_probes: Final = (
-        _dependency_deployments_to_probe(requested, _health_check_eligible(model_list, skip_disabled), router)
+        _dependency_deployments_to_probe(
+            requested,
+            _health_check_eligible(model_list, skip_disabled, allow_paid_media=health_check_paid_media),
+            router,
+        )
         if router is not None
         else ()
     )
